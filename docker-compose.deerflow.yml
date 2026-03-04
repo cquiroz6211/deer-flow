@@ -1,0 +1,97 @@
+# DeerFlow Development Environment (Custom Port 8080)
+# Usage: cd deerflow && docker-compose -f docker-compose.deerflow.yml up --build
+#
+# Services:
+#   - nginx: Reverse proxy (port 8080)
+#   - frontend: Frontend Next.js dev server (port 3000)
+#   - gateway: Backend Gateway API (port 8001)
+#   - langgraph: LangGraph server (port 2024)
+#
+# Access: http://localhost:8080
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: deer-flow-nginx
+    ports:
+      - "2026:2026"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./logs:/var/log/nginx
+    depends_on:
+      - frontend
+      - gateway
+      - langgraph
+    networks:
+      - deer-flow-net
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: deer-flow-frontend
+    command: sh -c "cd frontend && pnpm run dev > /app/logs/frontend.log 2>&1"
+    volumes:
+      - ./frontend/src:/app/frontend/src
+      - ./frontend/public:/app/frontend/public
+      - ./frontend/next.config.js:/app/frontend/next.config.js:ro
+      - ./logs:/app/logs
+    working_dir: /app
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+      - CI=true
+    networks:
+      - deer-flow-net
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: deer-flow-gateway
+    command: sh -c "cd backend && uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001 --reload --reload-include='*.yaml .env' > /app/logs/gateway.log 2>&1"
+    volumes:
+      - ./backend/src:/app/backend/src
+      - ./backend/.env:/app/backend/.env
+      - ./config.yaml:/app/config.yaml
+      - ./skills:/app/skills
+      - ./logs:/app/logs
+    working_dir: /app
+    environment:
+      - CI=true
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - deer-flow-net
+    restart: unless-stopped
+
+  langgraph:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: deer-flow-langgraph
+    command: sh -c "cd backend && uv run langgraph dev --no-browser --allow-blocking --host 0.0.0.0 --port 2024 > /app/logs/langgraph.log 2>&1"
+    volumes:
+      - ./backend/src:/app/backend/src
+      - ./backend/.env:/app/backend/.env
+      - ./config.yaml:/app/config.yaml
+      - ./skills:/app/skills
+      - ./logs:/app/logs
+    working_dir: /app
+    environment:
+      - CI=true
+    env_file:
+      - .env
+    networks:
+      - deer-flow-net
+    restart: unless-stopped
+
+volumes: {}
+
+networks:
+  deer-flow-net:
+    driver: bridge
